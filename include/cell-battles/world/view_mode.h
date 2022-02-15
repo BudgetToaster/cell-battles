@@ -1,0 +1,10 @@
+#ifndef CELL_BATTLES_VIEW_MODE_H
+#define CELL_BATTLES_VIEW_MODE_H
+
+enum ViewMode
+{
+    DEFAULT,
+    CLAIMABLE,
+};
+
+#endif //CELL_BATTLES_VIEW_MODE_H
