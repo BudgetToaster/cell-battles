@@ -4,7 +4,7 @@
 enum ViewMode
 {
     DEFAULT,
-    CLAIMABLE,
+    SUPPLY,
 };
 
 #endif //CELL_BATTLES_VIEW_MODE_H

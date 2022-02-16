@@ -53,7 +53,7 @@ int main()
                 if (event.key.code == sf::Keyboard::F1)
                     world.viewMode = DEFAULT;
                 else if (event.key.code == sf::Keyboard::F2)
-                    world.viewMode = CLAIMABLE;
+                    world.viewMode = SUPPLY;
             }
         }
 

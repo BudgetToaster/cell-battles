@@ -12,8 +12,8 @@ class Chunk
     std::vector<std::vector<std::shared_ptr<Cell>>> cells;
     int numTeams;
     std::vector<float> teamOwnership;
-    std::vector<bool> claimable;
-    bool isASpawn;
+    float supply = 0;
+    float supplyGeneration = 0;
 
 
 public:

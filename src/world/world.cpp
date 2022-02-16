@@ -9,240 +9,56 @@
 
 void World::updateTerritories(float delta)
 {
-    // Reuse this
-    static std::vector<uint32_t> cellCounts(settings.numTeams);
-    static std::vector<float> ownershipTarget(settings.numTeams);
+    // Reuse these
+    std::vector<uint32_t> cellCounts(settings.numTeams);
+    std::vector<float> ownershipTarget(settings.numTeams);
 
     for (int x = 0; x < settings.numChunks.x; x++)
     {
         for (int y = 0; y < settings.numChunks.y; y++)
         {
             float claimSpeed = 1.f;
-            auto &chunk = getChunk({x, y});
-
-            int numClaimable = 0;
-            for (int i = 0; i < settings.numTeams; i++)
-            {
-                if (chunk->claimable[i])
-                    numClaimable++;
-            }
+            auto& chunk = getChunk({x, y});
 
             uint32_t total = 0;
             for (int i = 0; i < settings.numTeams; i++)
             {
                 auto count = chunk->cells[i].size();
 
-                // Automatically claim undisputed territory, except for spawns
-                if (numClaimable == 1 && chunk->claimable[i] && !chunk->isASpawn)
-                {
-                    count++;
-                    claimSpeed = 5.f;
-                }
-
-                if (count > 0 && chunk->claimable[i])
+                if (count > 0)
                 {
                     total += count;
                     cellCounts[i] = count;
-                } else cellCounts[i] = 0;
+                }
+                else cellCounts[i] = 0;
             }
 
             if (total != 0)
             {
-                auto finalOwnership = chunk->teamOwnership;
                 for (int i = 0; i < settings.numTeams; i++)
                 {
                     ownershipTarget[i] = (float) cellCounts[i] / (float) total;
 
                     // Move towards ownershipTarget
-                    if (finalOwnership[i] > ownershipTarget[i])
+                    if (chunk->teamOwnership[i] > ownershipTarget[i])
                     {
-                        finalOwnership[i] -= delta * claimSpeed;
-                        finalOwnership[i] = clamp(finalOwnership[i], ownershipTarget[i], 1.f);
-                    } else
+                        chunk->teamOwnership[i] -= delta * claimSpeed;
+                        chunk->teamOwnership[i] = clamp(chunk->teamOwnership[i], ownershipTarget[i], 1.f);
+                    }
+                    else
                     {
-                        finalOwnership[i] += delta * claimSpeed;
-                        finalOwnership[i] = clamp(finalOwnership[i], 0.f, ownershipTarget[i]);
+                        chunk->teamOwnership[i] += delta * claimSpeed;
+                        chunk->teamOwnership[i] = clamp(chunk->teamOwnership[i], 0.f, ownershipTarget[i]);
                     }
                 }
 
-                updateChunkOwnership({x, y}, chunk, finalOwnership);
                 updateTerritoryColor({x, y}, chunk);
             }
         }
     }
-
-    for (sf::Vector3i v: claimabilityUpdateQueue)
-    {
-        int teamId = v.x;
-        int x = v.y;
-        int y = v.z;
-
-        if (!dirtyTeams[teamId]) partialUpdateChunkClaimability({x, y}, teamId);
-    }
-    claimabilityUpdateQueue.clear();
-
-    for (sf::Vector3i v: setClaimableQueue)
-    {
-        int teamId = v.x;
-        int x = v.y;
-        int y = v.z;
-
-        if (!dirtyTeams[teamId]) getChunk({x, y})->claimable[teamId] = true;
-    }
-    setClaimableQueue.clear();
-
-    for (int i = 0; i < settings.numTeams; i++)
-    {
-        if (dirtyTeams[i])
-        {
-            clearChunkClaimability(i);
-            floodUpdateTerritory(worldToChunkPos(settings.teamSpawns[i]), i);
-            dirtyTeams[i] = false;
-        }
-    }
 }
 
-void World::updateChunkOwnership(sf::Vector2i chunkPos, const std::unique_ptr<Chunk> &chunk,
-                                 const std::vector<float> &newOwnership)
-{
-    int initialOwner = chunk->getCurrentOwner();
-    int finalOwner = -1;
-    for (int i = 0; i < settings.numTeams; i++) // TODO: Optimize first if branch to also break
-        if (newOwnership[i] == 1.f) finalOwner = i;
-        else if (newOwnership[i] != 0.f) break;
-
-    if (initialOwner != finalOwner)
-    {
-        if (initialOwner == -1)
-        {
-            // Initially unowned, now owned. Connection may have been created.
-            if (checkConnectionCreated(chunkPos, chunk, finalOwner))
-            {
-                chunk->teamOwnership = newOwnership;
-                // Update entire team
-                dirtyTeams[finalOwner] = true;
-            } else
-            {
-                chunk->teamOwnership = newOwnership;
-                // Update only adjacent chunks
-                if (chunkPos.y + 1 < settings.numChunks.y)
-                    setClaimableQueue.emplace_back(finalOwner, chunkPos.x, chunkPos.y + 1);
-                if (chunkPos.y - 1 >= 0)
-                    setClaimableQueue.emplace_back(finalOwner, chunkPos.x, chunkPos.y - 1);
-                if (chunkPos.x + 1 < settings.numChunks.x)
-                    setClaimableQueue.emplace_back(finalOwner, chunkPos.x + 1, chunkPos.y);
-                if (chunkPos.x - 1 >= 0)
-                    setClaimableQueue.emplace_back(finalOwner, chunkPos.x - 1, chunkPos.y);
-            }
-        } else if (finalOwner == -1)
-        {
-            // Now unowned, connection may have been severed
-            chunk->teamOwnership = newOwnership;
-
-            if (chunk->isASpawn)
-            {
-                for (int i = 0; i < settings.numTeams; i++)
-                {
-                    if (chunkPos == worldToChunkPos(settings.teamSpawns[i]))
-                    {
-                        dirtyTeams[i] = true;
-                        return;
-                    }
-                }
-            }
-
-            if (checkConnectionSevered(chunkPos, chunk, initialOwner))
-                // Update entire team
-                dirtyTeams[initialOwner] = true;
-            else
-            {
-                // Update only adjacent chunks
-                if (chunkPos.y + 1 < settings.numChunks.y)
-                    claimabilityUpdateQueue.emplace_back(initialOwner, chunkPos.x, chunkPos.y + 1);
-                if (chunkPos.y - 1 >= 0)
-                    claimabilityUpdateQueue.emplace_back(initialOwner, chunkPos.x, chunkPos.y - 1);
-                if (chunkPos.x + 1 < settings.numChunks.x)
-                    claimabilityUpdateQueue.emplace_back(initialOwner, chunkPos.x + 1, chunkPos.y);
-                if (chunkPos.x - 1 >= 0)
-                    claimabilityUpdateQueue.emplace_back(initialOwner, chunkPos.x - 1, chunkPos.y);
-            }
-        } else
-        {
-            // Was and still is fully owned, but owners changed.
-            // Change should occur gradually but this case is included in case logic is changed.
-            // TODO
-            std::exit(-1);
-        }
-    } else chunk->teamOwnership = newOwnership;
-}
-
-bool World::checkConnectionSevered(sf::Vector2i chunkPos, const std::unique_ptr<Chunk> &chunk, int teamId)
-{
-    int x = chunkPos.x, y = chunkPos.y;
-
-    auto targets = std::vector<sf::Vector2i>();
-    targets.reserve(settings.numTeams);
-
-    if (x + 1 < settings.numChunks.x && getChunk(sf::Vector2i(x + 1, y))->teamOwnership[teamId] == 1.f)
-        targets.emplace_back(x + 1, y);
-    if (x - 1 >= 0 && getChunk(sf::Vector2i(x - 1, y))->teamOwnership[teamId] == 1.f)
-        targets.emplace_back(x - 1, y);
-    if (y + 1 < settings.numChunks.y && getChunk(sf::Vector2i(x, y + 1))->teamOwnership[teamId] == 1.f)
-        targets.emplace_back(x, y + 1);
-    if (y - 1 >= 0 && getChunk(sf::Vector2i(x, y - 1))->teamOwnership[teamId] == 1.f)
-        targets.emplace_back(x, y - 1);
-
-    if (targets.size() > 1)
-    {
-        auto p1 = targets.back();
-        targets.pop_back();
-
-        auto nowConnection = this->isEdgeConnectionApprox(p1, targets, {x, y}, teamId);
-
-        if (std::any_of(nowConnection.begin(), nowConnection.end(), [](bool b)
-        { return !b; }))
-        {
-            // A connection has been severed.
-            return true;
-        }
-    }
-    return false;
-}
-
-bool World::checkConnectionCreated(sf::Vector2i chunkPos, const std::unique_ptr<Chunk> &chunk, int teamId)
-{
-    int x = chunkPos.x, y = chunkPos.y;
-
-    auto targets = std::vector<sf::Vector2i>();
-    targets.reserve(settings.numTeams);
-
-    if (x + 1 < settings.numChunks.x && getChunk(sf::Vector2i(x + 1, y))->teamOwnership[teamId] == 1.f)
-        targets.emplace_back(x + 1, y);
-    if (x - 1 >= 0 && getChunk(sf::Vector2i(x - 1, y))->teamOwnership[teamId] == 1.f)
-        targets.emplace_back(x - 1, y);
-    if (y + 1 < settings.numChunks.y && getChunk(sf::Vector2i(x, y + 1))->teamOwnership[teamId] == 1.f)
-        targets.emplace_back(x, y + 1);
-    if (y - 1 >= 0 && getChunk(sf::Vector2i(x, y - 1))->teamOwnership[teamId] == 1.f)
-        targets.emplace_back(x, y - 1);
-
-    if (targets.size() > 1)
-    {
-        auto p1 = targets.back();
-        targets.pop_back();
-
-        auto wasConnection = this->isEdgeConnectionApprox(p1, targets, {x, y}, teamId);
-
-        if (std::any_of(wasConnection.begin(), wasConnection.end(), [](bool b)
-        { return !b; }))
-        {
-            // A new connection has been created.
-            return true;
-        }
-    }
-    return false;
-}
-
-void World::updateTerritoryColor(sf::Vector2i pos, const std::unique_ptr<Chunk> &chunk)
+void World::updateTerritoryColor(sf::Vector2i pos, const std::unique_ptr<Chunk>& chunk)
 {
     sf::Vector3f colorVec;
     for (int i = 0; i < settings.numTeams; i++)
@@ -260,167 +76,85 @@ void World::updateTerritoryColor(sf::Vector2i pos, const std::unique_ptr<Chunk> 
     territoryMap->setPixel(pos.x, pos.y, color);
 }
 
-std::vector<bool>
-World::isEdgeConnectionApprox(sf::Vector2i p1, std::vector<sf::Vector2i> targets, sf::Vector2i center, int teamId)
+void World::updateChunkSupply(float delta)
 {
-    // Walks clockwise
-    sf::Vector2i w1 = p1;
-    sf::Vector2i w1Dir = {(p1 - center).y, -(p1 - center).x};
-    sf::Vector2i w1Pref = center - p1;
+    static std::vector<int> ownerBuffer(settings.numChunks.x * settings.numChunks.y);
+    static std::vector<float> transferBuffer(settings.numChunks.x * settings.numChunks.y);
 
-    // Walks counterclockwise
-    sf::Vector2i w2 = p1;
-    sf::Vector2i w2Dir = -w1Dir;
-    sf::Vector2i w2Pref = center - p1;
+    for (int x = 0; x < settings.numChunks.x; x++)
+        for (int y = 0; y < settings.numChunks.y; y++)
+            ownerBuffer[x + y * settings.numChunks.x] = getChunk({x, y})->getCurrentOwner();
 
-    int nOut = 0;
-    auto out = std::vector<bool>(targets.size());
-    for (int i = 0; i < 8; i++)
+    for (int x = 0; x < settings.numChunks.x; x++)
     {
-        // Update w1
-        // Try to go in w1Pref
-        if (inBoundsEx(w1 + w1Pref, {0, 0}, settings.numChunks) &&
-            getChunk(w1 + w1Pref)->teamOwnership[teamId] == 1.f)
+        for (int y = 0; y < settings.numChunks.y; y++)
         {
-            w1 += w1Pref;
-            w1Dir = {w1Dir.y, -w1Dir.x};
-            w1Pref = {w1Pref.y, -w1Pref.x};
-        }
-            // Then try to go in w1Dir
-        else if (inBoundsEx(w1 + w1Dir, {0, 0}, settings.numChunks) &&
-                 getChunk(w1 + w1Dir)->teamOwnership[teamId] == 1.f)
-        {
-            w1 += w1Dir;
-        }
-            // Then turn left when all else fails
-        else
-        {
-            w1Dir = {-w1Dir.y, w1Dir.x};
-            w1Pref = {-w1Pref.y, w1Pref.x};
-        }
-        for (int i = 0; i < targets.size(); i++)
-            if (targets[i] == w1 && !out[i])
+            auto& curChunk = getChunk({x, y});
+            auto curChunkOwner = ownerBuffer[x + y * settings.numChunks.x];
+
+            if(curChunkOwner == -1)
             {
-                out[i] = true;
-                nOut++;
-                break;
+                transferBuffer[x + y * settings.numChunks.x] = -delta;
+                continue;
             }
 
-        if (nOut == targets.size()) return out;
+            float westSupply = curChunk->supply;
+            float eastSupply = curChunk->supply;
+            float northSupply = curChunk->supply;
+            float southSupply = curChunk->supply;
 
-        // Update w2
-        // Try to go in w2Pref
-        if (inBoundsEx(w2 + w2Pref, {0, 0}, settings.numChunks) &&
-            getChunk(w2 + w2Pref)->teamOwnership[teamId] == 1.f)
-        {
-            w2 += w2Pref;
-            w2Dir = {-w2Dir.y, w2Dir.x};
-            w2Pref = {-w2Pref.y, w2Pref.x};
-        }
-            // Then try to go in w2Dir
-        else if (inBoundsEx(w2 + w2Dir, {0, 0}, settings.numChunks) &&
-                 getChunk(w2 + w2Dir)->teamOwnership[teamId] == 1.f)
-        {
-            w2 += w2Dir;
-        }
-            // Then turn right when all else fails
-        else
-        {
-            w2Dir = {w2Dir.y, -w2Dir.x};
-            w2Pref = {w2Pref.y, -w2Pref.x};
-        }
-        for (int i = 0; i < targets.size(); i++)
-            if (targets[i] == w2 && !out[i])
-            {
-                out[i] = true;
-                nOut++;
-                break;
-            }
+            if (x + 1 < settings.numChunks.x && ownerBuffer[(x + 1) + y * settings.numChunks.x] == curChunkOwner)
+                eastSupply = getChunk({x + 1, y})->supply;
+            if (x - 1 >= 0 && ownerBuffer[(x - 1) + y * settings.numChunks.x] == curChunkOwner)
+                westSupply = getChunk({x - 1, y})->supply;
+            if (y + 1 < settings.numChunks.y && ownerBuffer[x + (y + 1) * settings.numChunks.x] == curChunkOwner)
+                southSupply = getChunk({x, y + 1})->supply;
+            if (y - 1 >= 0 && ownerBuffer[x + (y - 1) * settings.numChunks.x] == curChunkOwner)
+                northSupply = getChunk({x, y - 1})->supply;
 
-        if (nOut == targets.size()) return out;
+            float dsdx2 = (eastSupply - curChunk->supply) - (curChunk->supply - westSupply);
+            float dsdy2 = (southSupply - curChunk->supply) - (curChunk->supply - northSupply);
+
+            float supplyTransfer = (dsdx2 + dsdy2 * 0.1f) + curChunk->supplyGeneration;
+
+            transferBuffer[x + y * settings.numChunks.x] = supplyTransfer;
+        }
     }
-    return out;
-}
 
-void World::clearChunkClaimability(int teamId)
-{
-    for (auto &chunk: chunks)
-        chunk->claimable[teamId] = false;
-}
 
-void World::floodUpdateTerritory(sf::Vector2i root, int teamId)
-{
-    std::unique_ptr<std::list<sf::Vector2i>> stack = std::make_unique<std::list<sf::Vector2i>>();
-    stack->push_back(root);
-    while (!stack->empty())
+    for (int x = 0; x < settings.numChunks.x; x++)
     {
-        sf::Vector2i p = stack->front();
-        stack->pop_front();
-
-        if (!inBoundsEx(p, {0, 0}, settings.numChunks))
-            continue;
-
-        auto &chunk = getChunk(p);
-        if (chunk->claimable[teamId]) continue;
-        chunk->claimable[teamId] = true;
-        if (chunk->teamOwnership[teamId] == 1.f)
+        for (int y = 0; y < settings.numChunks.y; y++)
         {
-            stack->push_back(sf::Vector2i(p.x + 1, p.y));
-            stack->push_back(sf::Vector2i(p.x - 1, p.y));
-            stack->push_back(sf::Vector2i(p.x, p.y + 1));
-            stack->push_back(sf::Vector2i(p.x, p.y - 1));
+            getChunk({x, y})->supply += transferBuffer[x + y * settings.numChunks.x] * delta;
         }
     }
 }
 
-void World::partialUpdateChunkClaimability(sf::Vector2i chunkPos, int teamId)
+void World::updateCellSupply(float delta)
 {
-    auto &chunk = getChunk(chunkPos);
+    for(auto& cell : cells) {
+        auto& chunk = getChunk(worldToChunkPos(cell->position));
+        if(chunk->getCurrentOwner() != cell->teamId) continue;
+        float maxTransfer = delta * (1 / (0.3f * cell->supply + 1));
+        auto t = std::min(std::min(maxTransfer, chunk->supply), 2 - cell->supply);
+        cell->supply += t;
+        chunk->supply -= t;
 
-    if (chunkPos.y + 1 < settings.numChunks.y)
-    {
-        auto &offChunk = getChunk({chunkPos.x, chunkPos.y + 1});
-        if (offChunk->teamOwnership[teamId] == 1.f && offChunk->claimable[teamId])
-        {
-            chunk->claimable[teamId] = true;
-            return;
-        }
+        float passiveLoss = delta * 0.2f;
+        cell->supply -= passiveLoss;
+
+        if(cell->supply < 0) cell->health += cell->supply;
     }
-    if (chunkPos.y - 1 >= 0)
-    {
-        auto &offChunk = getChunk({chunkPos.x, chunkPos.y - 1});
-        if (offChunk->teamOwnership[teamId] == 1.f && offChunk->claimable[teamId])
-        {
-            chunk->claimable[teamId] = true;
-            return;
-        }
-    }
-    if (chunkPos.x + 1 < settings.numChunks.x)
-    {
-        auto &offChunk = getChunk({chunkPos.x + 1, chunkPos.y});
-        if (offChunk->teamOwnership[teamId] == 1.f && offChunk->claimable[teamId])
-        {
-            chunk->claimable[teamId] = true;
-            return;
-        }
-    }
-    if (chunkPos.y - 1 >= 0)
-    {
-        auto &offChunk = getChunk({chunkPos.x - 1, chunkPos.y});
-        if (offChunk->teamOwnership[teamId] == 1.f && offChunk->claimable[teamId])
-        {
-            chunk->claimable[teamId] = true;
-            return;
-        }
-    }
-    chunk->claimable[teamId] = false;
+
+    deleteDeadCells();
 }
 
 void World::updateVelocities(float delta)
 {
     float cellViewRange = 2;
 
-    for (auto &c: cells)
+    for (auto& c: cells)
     {
         auto centerPos = worldToChunkPos(c->position);
         int rectRadius = (int) ceilf(cellViewRange);
@@ -436,8 +170,8 @@ void World::updateVelocities(float delta)
                     continue;
 
                 int distSq = ox * ox + oy * oy;
-                auto &chunk = getChunk(offsetPos);
-                if ((float) distSq <= cellViewRange * cellViewRange && chunk->claimable[c->teamId])
+                auto& chunk = getChunk(offsetPos);
+                if ((float) distSq <= cellViewRange * cellViewRange)
                 {
                     float weight =
                             (1 - chunk->teamOwnership[c->teamId]) / ((float) chunk->cells[c->teamId].size() + 1.f);
@@ -457,7 +191,7 @@ void World::updateVelocities(float delta)
 
 void World::updatePositions(float delta)
 {
-    for (auto &cell: cells)
+    for (auto& cell: cells)
     {
         sf::Vector2f newPos = cell->position + cell->velocity * delta;
         if (newPos.x < 0)
@@ -465,7 +199,8 @@ void World::updatePositions(float delta)
             newPos.x = 0;
             cell->velocity.x *= -1;
             cell->preferredVelocity.x *= -1;
-        } else if (newPos.x >= (float) settings.width - 1e-4f)
+        }
+        else if (newPos.x >= (float) settings.width - 1e-4f)
         {
             newPos.x = (float) settings.width - 1e-4f;
             cell->velocity.x *= -1;
@@ -476,7 +211,8 @@ void World::updatePositions(float delta)
             newPos.y = 0;
             cell->velocity.y *= -1;
             cell->preferredVelocity.y *= -1;
-        } else if (newPos.y >= (float) settings.height - 1e-4f)
+        }
+        else if (newPos.y >= (float) settings.height - 1e-4f)
         {
             newPos.y = (float) settings.height - 1e-4f;
             cell->velocity.y *= -1;
@@ -489,23 +225,26 @@ void World::updatePositions(float delta)
 void World::attackNearby(float delta)
 {
     // Attack
-    for (auto &c: cells)
+    for (auto& c: cells)
     {
         auto closestEnemy = findNearestEnemies(*c, settings.cellAttackRange);
         if (closestEnemy == nullptr) continue;
 
-        float damageMul = c->strength / closestEnemy->strength * 0.1f;
+        float damageMul = c->strength / closestEnemy->strength;
 
         closestEnemy->health -= delta * damageMul;
-        c->food += delta * damageMul;
 
         if (closestEnemy->health < 0)
         {
-            c->food += closestEnemy->health;
             closestEnemy->health = 0;
         }
     }
 
+    deleteDeadCells();
+}
+
+void World::deleteDeadCells()
+{
     // Kill dead cells, always incrementing iterator before deletion.
     for (auto it = cells.begin(); it != cells.end();)
     {
@@ -513,18 +252,21 @@ void World::attackNearby(float delta)
             deleteCell(it++);
         else it++;
     }
+}
 
-    // Spawn children
+void World::spawnChildren(float delta)
+{
     static std::uniform_real_distribution<float> angleDistrib(0.f, PI_f * 2);
     static std::uniform_real_distribution<float> distrib01(0.f, 1);
     static std::uniform_real_distribution<float> strengthMulDist(0.8f, 1.25f);
     static std::uniform_real_distribution<float> velocityDistrib(-1.f, 1);
     static std::uniform_int_distribution<int> seedDistrib(-(1 << 30), 1 << 30);
-    for (auto &parent: cells)
+    for (auto& parent: cells)
     {
-        if (parent->food >= 1)
+        if (parent->supply >= 2 && parent->lastBirth < worldTime - 60)
         {
-            parent->food -= 1;
+            parent->supply -= 1;
+            parent->lastBirth = worldTime;
 
             float angle = angleDistrib(this->generator);
             float dist = sqrtf(distrib01(this->generator)) * 3.f;
@@ -546,17 +288,17 @@ void World::attackNearby(float delta)
                                                 velocity, preferredVelocity, position);
             sf::Vector2i chunkPos = worldToChunkPos(child->position);
             this->cells.push_back(child);
-            auto &chunk = this->getChunk(chunkPos);
+            auto& chunk = this->getChunk(chunkPos);
             chunk->cells[child->teamId].push_back(child);
         }
     }
 }
 
-void World::deleteCell(const std::list<std::shared_ptr<Cell>>::iterator &it)
+void World::deleteCell(const std::list<std::shared_ptr<Cell>>::iterator& it)
 {
     auto elem = *it;
 
-    auto &chunkCells = getChunk(worldToChunkPos(elem->position))->cells[elem->teamId];
+    auto& chunkCells = getChunk(worldToChunkPos(elem->position))->cells[elem->teamId];
     chunkCells.erase(std::find(chunkCells.begin(), chunkCells.end(), elem));
 
     cells.erase(it);
@@ -570,21 +312,21 @@ sf::Vector2i World::worldToChunkPos(sf::Vector2f position) const
     return {cx, cy};
 }
 
-void World::updateCellPosition(const std::shared_ptr<Cell> &cell, sf::Vector2f newPosition)
+void World::updateCellPosition(const std::shared_ptr<Cell>& cell, sf::Vector2f newPosition)
 {
     auto oldChunkPos = worldToChunkPos(cell->position);
     auto newChunkPos = worldToChunkPos(newPosition);
     cell->position = newPosition;
     if (newChunkPos != oldChunkPos)
     {
-        auto &oldCells = getChunk(oldChunkPos)->cells[cell->teamId];
-        auto &newCells = getChunk(newChunkPos)->cells[cell->teamId];
+        auto& oldCells = getChunk(oldChunkPos)->cells[cell->teamId];
+        auto& newCells = getChunk(newChunkPos)->cells[cell->teamId];
         newCells.push_back(cell);
         oldCells.erase(std::find(oldCells.begin(), oldCells.end(), cell));
     }
 }
 
-std::shared_ptr<Cell> World::findNearestEnemies(const Cell &cell, float maxDistance)
+std::shared_ptr<Cell> World::findNearestEnemies(const Cell& cell, float maxDistance)
 {
     int searchDistance = (int) ceilf(maxDistance / settings.pixelsPerChunk);
 
@@ -601,12 +343,12 @@ std::shared_ptr<Cell> World::findNearestEnemies(const Cell &cell, float maxDista
             if (!inBoundsEx(offsetPos, {0, 0}, settings.numChunks))
                 continue;
 
-            auto &chunk = getChunk(offsetPos);
+            auto& chunk = getChunk(offsetPos);
             for (int i = 0; i < settings.numTeams; i++)
             {
                 if (i == cell.teamId) continue;
 
-                for (auto &otherCell: chunk->cells[i])
+                for (auto& otherCell: chunk->cells[i])
                 {
                     auto cellOffset = otherCell->position - cell.position;
                     auto cellDistance = sqrtf(cellOffset.x * cellOffset.x + cellOffset.y * cellOffset.y);
@@ -623,7 +365,7 @@ std::shared_ptr<Cell> World::findNearestEnemies(const Cell &cell, float maxDista
     return bestMatch;
 }
 
-std::shared_ptr<Cell> World::findNearestFriendly(const Cell &cell, float maxDistance)
+std::shared_ptr<Cell> World::findNearestFriendly(const Cell& cell, float maxDistance)
 {
     int searchDistance = (int) ceilf(maxDistance / settings.pixelsPerChunk);
 
@@ -640,12 +382,12 @@ std::shared_ptr<Cell> World::findNearestFriendly(const Cell &cell, float maxDist
             if (!inBoundsEx(offsetPos, {0, 0}, settings.numChunks))
                 continue;
 
-            auto &chunk = getChunk(offsetPos);
+            auto& chunk = getChunk(offsetPos);
             for (int i = 0; i < settings.numTeams; i++)
             {
                 if (i != cell.teamId) continue;
 
-                for (auto &otherCell: chunk->cells[i])
+                for (auto& otherCell: chunk->cells[i])
                 {
                     auto cellOffset = otherCell->position - cell.position;
                     auto cellDistance = sqrtf(cellOffset.x * cellOffset.x + cellOffset.y * cellOffset.y);
@@ -662,7 +404,7 @@ std::shared_ptr<Cell> World::findNearestFriendly(const Cell &cell, float maxDist
     return bestMatch;
 }
 
-const std::unique_ptr<Chunk> &World::getChunk(sf::Vector2i position) const
+const std::unique_ptr<Chunk>& World::getChunk(sf::Vector2i position) const
 {
     return this->chunks[position.x + position.y * settings.numChunks.x];
 }
@@ -673,20 +415,32 @@ const std::unique_ptr<Chunk> &World::getChunk(sf::Vector2i position) const
 
 World::World(WorldSettings settings, int seed) :
         settings(std::move(settings)), pool((int) std::thread::hardware_concurrency()),
-        generator(seed), dirtyTeams(settings.numTeams)
+        generator(seed)
 {
     this->settings.numChunks.x = (int) ceilf((float) this->settings.width / (float) this->settings.pixelsPerChunk);
     this->settings.numChunks.y = (int) ceilf((float) this->settings.height / (float) this->settings.pixelsPerChunk);
+
+    walkOrder.reserve(this->settings.numChunks.x * this->settings.numChunks.y);
+    for (int x = 0; x < this->settings.numChunks.x; x++)
+    {
+        for (int y = 0; y < this->settings.numChunks.y; y++)
+        {
+            walkOrder.emplace_back(x, y);
+        }
+    }
+    for (int i = 0; i < walkOrder.size() - 1; i++)
+    {
+        std::uniform_int_distribution<int> indexDistrib(i, (int) walkOrder.size() - 1);
+        auto randIdx = indexDistrib(generator);
+        auto temp = walkOrder[randIdx];
+        walkOrder[randIdx] = walkOrder[i];
+        walkOrder[i] = temp;
+    }
 
     chunks = std::vector<std::unique_ptr<Chunk>>(this->settings.numChunks.x * this->settings.numChunks.y);
     for (int i = 0; i < chunks.size(); i++)
         // Set isASpawn to false initially, will be updated
         chunks[i] = std::make_unique<Chunk>(this->settings.numTeams, false);
-
-    for (int i = 0; i < settings.numTeams; i++)
-    {
-        getChunk(worldToChunkPos(this->settings.teamSpawns[i]))->isASpawn = true;
-    }
 
     this->territoryMap->create(this->settings.numChunks.x, this->settings.numChunks.y);
 
@@ -708,11 +462,11 @@ World::World(WorldSettings settings, int seed) :
 
             sf::Vector2f velocity = {velocityDistrib(generator), velocityDistrib(generator)};
             sf::Vector2f prefferedVelocity = {cosf(angle), sinf(angle)};
-            auto c = std::make_shared<Cell>(teamId, seedDistrib(generator), 1, 1, 0,
+            auto c = std::make_shared<Cell>(teamId, seedDistrib(generator), 1, 1, 1,
                                             velocity, prefferedVelocity, position);
             sf::Vector2i chunkPos = worldToChunkPos(c->position);
             this->cells.push_back(c);
-            auto &chunk = this->getChunk(chunkPos);
+            auto& chunk = this->getChunk(chunkPos);
             chunk->cells[c->teamId].push_back(c);
 
             if (chunk->teamOwnership[c->teamId] != 1.f)
@@ -723,8 +477,9 @@ World::World(WorldSettings settings, int seed) :
         }
     }
 
-    for (int i = 0; i < this->settings.numTeams; i++)
-        floodUpdateTerritory(worldToChunkPos(this->settings.teamSpawns[i]), i);
+    std::exponential_distribution<float> supplyGenerationDistrib(1.f);
+    for (const auto& chunk: chunks)
+        chunk->supplyGeneration = supplyGenerationDistrib(generator);
 }
 
 void World::step(float delta)
@@ -732,12 +487,15 @@ void World::step(float delta)
     this->worldTime += delta;
 
     updateTerritories(delta);
+    updateChunkSupply(delta);
+    updateCellSupply(delta);
     updateVelocities(delta);
     updatePositions(delta);
     attackNearby(delta);
+    spawnChildren(delta);
 }
 
-void World::draw(sf::RenderTarget &target, sf::RenderStates states) const
+void World::draw(sf::RenderTarget& target, sf::RenderStates states) const
 {
     sf::CircleShape circle(settings.cellRadius, 8);
     circle.setOrigin(settings.cellRadius, settings.cellRadius);
@@ -750,7 +508,8 @@ void World::draw(sf::RenderTarget &target, sf::RenderStates states) const
         sprite.setScale(settings.pixelsPerChunk, settings.pixelsPerChunk);
 
         target.draw(sprite, states);
-    } else if (viewMode == ViewMode::CLAIMABLE)
+    }
+    else if (viewMode == ViewMode::SUPPLY)
     {
         sf::Image claimableImg = sf::Image();
         claimableImg.create(settings.numChunks.x, settings.numChunks.y);
@@ -758,18 +517,8 @@ void World::draw(sf::RenderTarget &target, sf::RenderStates states) const
         {
             for (int y = 0; y < settings.numChunks.y; y++)
             {
-                auto &chunk = getChunk(sf::Vector2i(x, y));
-                float totalClaimable = 0;
-                for (int i = 0; i < settings.numTeams; i++)
-                    if (chunk->claimable[i]) totalClaimable++;
-                if (totalClaimable == 0) continue;
-                sf::Vector3f colorVec;
-                for (int i = 0; i < settings.numTeams; i++)
-                {
-                    colorVec.x += (float) settings.teamColors[i].r * (chunk->claimable[i] ? 1.f : 0.f) / totalClaimable;
-                    colorVec.y += (float) settings.teamColors[i].g * (chunk->claimable[i] ? 1.f : 0.f) / totalClaimable;
-                    colorVec.z += (float) settings.teamColors[i].b * (chunk->claimable[i] ? 1.f : 0.f) / totalClaimable;
-                }
+                auto& chunk = getChunk(sf::Vector2i(x, y));
+                sf::Vector3f colorVec = chunk->supply * sf::Vector3f(10.f, 10.f, 10.f);
                 claimableImg.setPixel(x, y,
                                       sf::Color((uint8_t) colorVec.x, (uint8_t) colorVec.y, (uint8_t) colorVec.z, 127));
             }
@@ -784,7 +533,7 @@ void World::draw(sf::RenderTarget &target, sf::RenderStates states) const
     }
     // else impossible
 
-    for (const auto &c: cells)
+    for (const auto& c: cells)
     {
         auto pos = c->position;
         circle.setPosition(pos);
@@ -795,7 +544,4 @@ void World::draw(sf::RenderTarget &target, sf::RenderStates states) const
     }
 }
 
-World::~World()
-{
-
-}
+World::~World() {}

@@ -1,8 +1,7 @@
 #include "world/chunk.h"
 
 Chunk::Chunk(int numTeams, bool isASpawn) :
-        cells(numTeams), numTeams(numTeams), teamOwnership(numTeams),
-        claimable(numTeams), isASpawn(isASpawn)
+        cells(numTeams), numTeams(numTeams), teamOwnership(numTeams)
 {
 
 }
