@@ -25,7 +25,7 @@ void World::updateTerritories(float delta)
             {
                 auto count = chunk->cells[i].size();
 
-                if (count > 0)
+                if (count > 0 && (isClaimable({x, y}, i)))
                 {
                     total += count;
                     cellCounts[i] = count;
@@ -134,17 +134,20 @@ void World::updateChunkSupply(float delta)
 void World::updateCellSupply(float delta)
 {
     for(auto& cell : cells) {
-        auto& chunk = getChunk(worldToChunkPos(cell->position));
-        if(chunk->getCurrentOwner() != cell->teamId) continue;
-        float maxTransfer = delta * (1 / (0.3f * cell->supply + 1));
-        auto t = std::min(std::min(maxTransfer, chunk->supply), 2 - cell->supply);
-        cell->supply += t;
-        chunk->supply -= t;
-
-        float passiveLoss = delta * 0.2f;
+        float passiveLoss = delta * 0.03f * (cell->supply * cell->supply + 5.f);
         cell->supply -= passiveLoss;
 
-        if(cell->supply < 0) cell->health += cell->supply;
+        if(cell->supply < 0)
+        {
+            cell->health += cell->supply;
+            cell->supply = 0;
+        }
+
+        auto& chunk = getChunk(worldToChunkPos(cell->position));
+        if(chunk->getCurrentOwner() != cell->teamId) continue;
+        auto t = std::min(delta, chunk->supply);
+        cell->supply += t;
+        chunk->supply -= t;
     }
 
     deleteDeadCells();
@@ -171,10 +174,16 @@ void World::updateVelocities(float delta)
 
                 int distSq = ox * ox + oy * oy;
                 auto& chunk = getChunk(offsetPos);
-                if ((float) distSq <= cellViewRange * cellViewRange)
+                bool edge = isEdge(offsetPos, c->teamId);
+                bool claimable = isClaimable(offsetPos, c->teamId);
+                if ((float) distSq <= cellViewRange * cellViewRange && claimable)
                 {
-                    float weight =
-                            (1 - chunk->teamOwnership[c->teamId]) / ((float) chunk->cells[c->teamId].size() + 1.f);
+                    float weight = 1.f / ((float) chunk->cells[c->teamId].size() + 1.f);
+
+                    if(!(edge || chunk->teamOwnership[c->teamId] < 1)) weight *= 0;
+
+                    if(chunk->supply > 0) weight += 100000.f * (2.5f - c->supply);
+
                     auto squareDist = (float) (ox * ox + oy * oy);
                     sf::Vector2f vecWeight = sf::Vector2f((float) ox, (float) oy) / (squareDist + 1);
                     targetVelocity += weight * vecWeight;
@@ -182,7 +191,7 @@ void World::updateVelocities(float delta)
             }
         }
 
-        targetVelocity += c->preferredVelocity / 1000.f;
+        targetVelocity += c->preferredVelocity / 100.f;
         targetVelocity /= (sqrtf(targetVelocity.x * targetVelocity.x + targetVelocity.y * targetVelocity.y) + 1e-8f);
         targetVelocity *= 50.f;
         c->velocity = (1 - delta) * c->velocity + delta * targetVelocity;
@@ -230,7 +239,7 @@ void World::attackNearby(float delta)
         auto closestEnemy = findNearestEnemies(*c, settings.cellAttackRange);
         if (closestEnemy == nullptr) continue;
 
-        float damageMul = c->strength / closestEnemy->strength;
+        float damageMul = c->strength / closestEnemy->strength * 0.3f;
 
         closestEnemy->health -= delta * damageMul;
 
@@ -263,9 +272,9 @@ void World::spawnChildren(float delta)
     static std::uniform_int_distribution<int> seedDistrib(-(1 << 30), 1 << 30);
     for (auto& parent: cells)
     {
-        if (parent->supply >= 2 && parent->lastBirth < worldTime - 60)
+        if (parent->supply >= 2.5 && parent->lastBirth < worldTime - 60)
         {
-            parent->supply -= 1;
+            parent->supply -= 2;
             parent->lastBirth = worldTime;
 
             float angle = angleDistrib(this->generator);
@@ -283,9 +292,12 @@ void World::spawnChildren(float delta)
 
             auto strengthMul = strengthMulDist(generator);
 
+            float targetSupply = distrib01(generator) > 0.5 ? 1.f : 3.f;
+
             auto child = std::make_shared<Cell>(parent->teamId, seedDistrib(generator),
-                                                parent->strength * strengthMul, 1, 0,
+                                                parent->strength * strengthMul, 1, 1, targetSupply,
                                                 velocity, preferredVelocity, position);
+            child->lastBirth = worldTime;
             sf::Vector2i chunkPos = worldToChunkPos(child->position);
             this->cells.push_back(child);
             auto& chunk = this->getChunk(chunkPos);
@@ -409,6 +421,60 @@ const std::unique_ptr<Chunk>& World::getChunk(sf::Vector2i position) const
     return this->chunks[position.x + position.y * settings.numChunks.x];
 }
 
+bool World::isEdge(sf::Vector2i p, int teamId)
+{
+    bool friendlyConnected = false;
+    bool enemyConnected = false;
+
+    if(p.x + 1 < settings.numChunks.x)
+    {
+        if (getChunk({p.x + 1, p.y})->teamOwnership[teamId] == 1.f)
+            friendlyConnected = true;
+        else enemyConnected = true;
+    }
+
+    if(p.x - 1 >= 0)
+    {
+        if (getChunk({p.x - 1, p.y})->teamOwnership[teamId] == 1.f)
+            friendlyConnected = true;
+        else enemyConnected = true;
+    }
+
+    if(friendlyConnected && enemyConnected) return true;
+
+    if(p.y + 1 < settings.numChunks.y)
+    {
+        if (getChunk({p.x, p.y + 1})->teamOwnership[teamId] == 1.f)
+            friendlyConnected = true;
+        else enemyConnected = true;
+    }
+
+    if(friendlyConnected && enemyConnected) return true;
+
+    if(p.y - 1 >= 0)
+    {
+        if (getChunk({p.x, p.y - 1})->teamOwnership[teamId] == 1.f)
+            friendlyConnected = true;
+        else enemyConnected = true;
+    }
+
+    return friendlyConnected && enemyConnected;
+}
+
+bool World::isClaimable(sf::Vector2i p, int teamId)
+{
+    if(p.x + 1 < settings.numChunks.x && getChunk({p.x + 1, p.y})->teamOwnership[teamId] == 1.f)
+        return true;
+    if(p.x - 1 >= 0 && getChunk({p.x - 1, p.y})->teamOwnership[teamId] == 1.f)
+        return true;
+    if(p.y + 1 < settings.numChunks.y && getChunk({p.x, p.y + 1})->teamOwnership[teamId] == 1.f)
+        return true;
+    if(p.y - 1 >= 0 && getChunk({p.x, p.y - 1})->teamOwnership[teamId] == 1.f)
+        return true;
+
+    return false;
+}
+
 //
 // PUBLIC FUNCTIONS
 //
@@ -462,7 +528,10 @@ World::World(WorldSettings settings, int seed) :
 
             sf::Vector2f velocity = {velocityDistrib(generator), velocityDistrib(generator)};
             sf::Vector2f prefferedVelocity = {cosf(angle), sinf(angle)};
-            auto c = std::make_shared<Cell>(teamId, seedDistrib(generator), 1, 1, 1,
+
+            float targetSupply = distrib01(generator) > 0.5 ? 1.f : 3.f;
+
+            auto c = std::make_shared<Cell>(teamId, seedDistrib(generator), 1, 1, 1, targetSupply,
                                             velocity, prefferedVelocity, position);
             sf::Vector2i chunkPos = worldToChunkPos(c->position);
             this->cells.push_back(c);

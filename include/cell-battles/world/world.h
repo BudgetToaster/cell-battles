@@ -29,7 +29,8 @@ class World : public sf::Drawable
 
 
     void updateTerritories(float delta);
-    void updateTerritoryColor(sf::Vector2i pos, const std::unique_ptr<Chunk> &chunk);
+
+    void updateTerritoryColor(sf::Vector2i pos, const std::unique_ptr<Chunk>& chunk);
 
     void updateChunkSupply(float delta);
 
@@ -45,26 +46,31 @@ class World : public sf::Drawable
 
     void spawnChildren(float delta);
 
-    void deleteCell(const std::list<std::shared_ptr<Cell>>::iterator &it);
+    void deleteCell(const std::list<std::shared_ptr<Cell>>::iterator& it);
 
     // Updates cell position. Will also update chunks the cell is in, or moves to.
-    void updateCellPosition(const std::shared_ptr<Cell> &cell, sf::Vector2f newPosition);
+    void updateCellPosition(const std::shared_ptr<Cell>& cell, sf::Vector2f newPosition);
 
-    std::shared_ptr<Cell> findNearestEnemies(const Cell &cell, float maxDistance);
+    std::shared_ptr<Cell> findNearestEnemies(const Cell& cell, float maxDistance);
 
-    std::shared_ptr<Cell> findNearestFriendly(const Cell &cell, float maxDistance);
+    std::shared_ptr<Cell> findNearestFriendly(const Cell& cell, float maxDistance);
 
-    const std::unique_ptr<Chunk> &getChunk(sf::Vector2i pos) const;
+    const std::unique_ptr<Chunk>& getChunk(sf::Vector2i pos) const;
+
+    bool isEdge(sf::Vector2i chunkPos, int teamId);
+
+    bool isClaimable(sf::Vector2i chunkPos, int teamId);
 
 public:
     ViewMode viewMode = ViewMode::DEFAULT;
 
     World(WorldSettings settings, int seed);
+
     ~World() override;
 
     void step(float delta);
 
-    void draw(sf::RenderTarget &target, sf::RenderStates states) const override;
+    void draw(sf::RenderTarget& target, sf::RenderStates states) const override;
 
     sf::Vector2i worldToChunkPos(sf::Vector2f position) const;
 };
