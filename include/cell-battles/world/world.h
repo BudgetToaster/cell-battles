@@ -15,6 +15,7 @@ class World : public sf::Drawable
     WorldSettings settings;
 
     std::vector<std::unique_ptr<Chunk>> chunks;
+    float maxSupplyGeneration = -1.f;
     std::list<std::shared_ptr<Cell>> cells;
     float worldTime = 0;
 

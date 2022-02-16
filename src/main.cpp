@@ -11,17 +11,19 @@ int main()
     constexpr int HEIGHT = 1080;
 
     sf::RenderWindow window(sf::VideoMode(WIDTH, HEIGHT), "Cell Battles",
-                            sf::Style::Default, windowSettings);
+                            sf::Style::Fullscreen, windowSettings);
+    window.setFramerateLimit(0);
+    window.setVerticalSyncEnabled(false);
 
     WorldSettings worldSettings;
-    worldSettings.width = 1920;
-    worldSettings.height = 1080;
+    worldSettings.width = WIDTH;
+    worldSettings.height = HEIGHT;
 
     worldSettings.pixelsPerChunk = 10;
 
     worldSettings.numTeams = 4;
     worldSettings.cellRadius = 3;
-    worldSettings.initialCellsPerTeam = 1000;
+    worldSettings.initialCellsPerTeam = 100;
     worldSettings.cellAttackRange = 10;
 
     worldSettings.teamColors = {
@@ -40,6 +42,14 @@ int main()
 
     World world = World(worldSettings, 3211);
 
+    sf::Font robotoFont;
+    robotoFont.loadFromFile("roboto/Roboto-Light.ttf");
+
+    sf::Text fpsText;
+    fpsText.setFont(robotoFont);
+    fpsText.setCharacterSize(11);
+    fpsText.setFillColor(sf::Color::White);
+
     auto lastTime = std::chrono::steady_clock::now().time_since_epoch().count();
     while (window.isOpen())
     {
@@ -54,17 +64,21 @@ int main()
                     world.viewMode = DEFAULT;
                 else if (event.key.code == sf::Keyboard::F2)
                     world.viewMode = SUPPLY;
+                else if(event.key.code == sf::Keyboard::F3)
+                    world.viewMode = SUPPLY_GENERATION;
             }
         }
 
         auto now = std::chrono::steady_clock::now().time_since_epoch().count();
-        float delta = (float) (now - lastTime) / 1000000000.f;
-        if (delta > 0.05) delta = 0.05;
+        float delta = (float) (now - lastTime) / 1000000000.f * 5;
+        fpsText.setString(std::string("FPS: ") + std::to_string(1.f / delta));
+        if (delta > 0.2) delta = 0.2;
         world.step(delta);
         lastTime = now;
 
         window.clear();
         window.draw(world);
+        window.draw(fpsText);
         window.display();
     }
 

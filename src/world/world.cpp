@@ -94,7 +94,7 @@ void World::updateChunkSupply(float delta)
 
             if(curChunkOwner == -1)
             {
-                transferBuffer[x + y * settings.numChunks.x] = -delta;
+                transferBuffer[x + y * settings.numChunks.x] = std::max(10.f * -delta, -curChunk->supply);
                 continue;
             }
 
@@ -115,7 +115,7 @@ void World::updateChunkSupply(float delta)
             float dsdx2 = (eastSupply - curChunk->supply) - (curChunk->supply - westSupply);
             float dsdy2 = (southSupply - curChunk->supply) - (curChunk->supply - northSupply);
 
-            float supplyTransfer = (dsdx2 + dsdy2 * 0.1f) + curChunk->supplyGeneration;
+            float supplyTransfer = (dsdx2 + dsdy2) + curChunk->supplyGeneration;
 
             transferBuffer[x + y * settings.numChunks.x] = supplyTransfer;
         }
@@ -126,7 +126,8 @@ void World::updateChunkSupply(float delta)
     {
         for (int y = 0; y < settings.numChunks.y; y++)
         {
-            getChunk({x, y})->supply += transferBuffer[x + y * settings.numChunks.x] * delta;
+            auto& chunk = getChunk({x, y});
+            chunk->supply += transferBuffer[x + y * settings.numChunks.x] * delta;
         }
     }
 }
@@ -159,6 +160,8 @@ void World::updateVelocities(float delta)
 
     for (auto& c: cells)
     {
+        bool needSupply = c->supply < c->targetSupply;
+
         auto centerPos = worldToChunkPos(c->position);
         int rectRadius = (int) ceilf(cellViewRange);
 
@@ -168,32 +171,63 @@ void World::updateVelocities(float delta)
         {
             for (int oy = -rectRadius; oy <= rectRadius; oy++)
             {
+                if(ox == 0 && oy == 0) continue;
+
                 sf::Vector2i offsetPos = {ox + centerPos.x, oy + centerPos.y};
                 if (!inBoundsEx(offsetPos, {0, 0}, settings.numChunks))
                     continue;
 
                 int distSq = ox * ox + oy * oy;
                 auto& chunk = getChunk(offsetPos);
-                bool edge = isEdge(offsetPos, c->teamId);
-                bool claimable = isClaimable(offsetPos, c->teamId);
-                if ((float) distSq <= cellViewRange * cellViewRange && claimable)
+
+                bool isClaimed = chunk->teamOwnership[c->teamId] == 1.f;
+
+
+                if ((float) distSq <= cellViewRange * cellViewRange)
                 {
-                    float weight = 1.f / ((float) chunk->cells[c->teamId].size() + 1.f);
+                    bool needsDefense = isEdge(offsetPos, c->teamId) ||
+                            (isClaimable(offsetPos, c->teamId) && chunk->teamOwnership[c->teamId] < 1);
 
-                    if(!(edge || chunk->teamOwnership[c->teamId] < 1)) weight *= 0;
+                    float weight;
 
-                    if(chunk->supply > 0) weight += 100000.f * (2.5f - c->supply);
+                    if((needSupply && isClaimed) && needsDefense)
+                    {
+                        // Encourage cells to go to undefended areas
+                        float uniformDefenseWeight = 1.f / ((float)chunk->cells[c->teamId].size() + 1.f);
 
-                    auto squareDist = (float) (ox * ox + oy * oy);
-                    sf::Vector2f vecWeight = sf::Vector2f((float) ox, (float) oy) / (squareDist + 1);
+                        weight = std::min(1.f, chunk->supply) * std::max(1.f, 10.f * uniformDefenseWeight);
+                    }
+                    else if(needSupply && isClaimed)
+                    {
+                        // Need supply but chunk doesnt need defense
+                        weight = std::min(1.f, chunk->supply);
+                    }
+                    else if(needsDefense)
+                    {
+                        // Chunk needs defense and cell doesn't need supply
+
+                        // Encourage cells to go to undefended areas
+                        float uniformDefenseWeight = 1.f / ((float)chunk->cells[c->teamId].size() + 1.f);
+                        weight = uniformDefenseWeight;
+                    }
+                    else
+                    {
+                        // Don't need supply and chunk doesn't need defense.
+                        continue;
+                    }
+
+                    auto offsetDist = sqrtf((float)(ox * ox + oy * oy));
+                    sf::Vector2f vecWeight = sf::Vector2f((float) ox, (float) oy) / (offsetDist);
                     targetVelocity += weight * vecWeight;
                 }
             }
         }
 
-        targetVelocity += c->preferredVelocity / 100.f;
-        targetVelocity /= (sqrtf(targetVelocity.x * targetVelocity.x + targetVelocity.y * targetVelocity.y) + 1e-8f);
-        targetVelocity *= 50.f;
+        if(std::abs(targetVelocity.x) < 0.01f && std::abs(targetVelocity.y) < 0.01f)
+            targetVelocity = c->preferredVelocity;
+        auto targetVelocityMag = sqrtf(targetVelocity.x * targetVelocity.x + targetVelocity.y * targetVelocity.y);
+        targetVelocity /= targetVelocityMag;
+        targetVelocity *= 20.f;
         c->velocity = (1 - delta) * c->velocity + delta * targetVelocity;
     }
 }
@@ -272,7 +306,7 @@ void World::spawnChildren(float delta)
     static std::uniform_int_distribution<int> seedDistrib(-(1 << 30), 1 << 30);
     for (auto& parent: cells)
     {
-        if (parent->supply >= 2.5 && parent->lastBirth < worldTime - 60)
+        if (parent->supply >= 2.5 && parent->lastBirth < worldTime - 10)
         {
             parent->supply -= 2;
             parent->lastBirth = worldTime;
@@ -284,8 +318,7 @@ void World::spawnChildren(float delta)
                     cosf(angle) * dist + parent->position.x,
                     sinf(angle) * dist + parent->position.y
             };
-            position = clamp(position, {0, 0},
-                             {(float) settings.width - 1e-4f, (float) settings.height - 1e-4f});
+            position = clamp(position, {0, 0},{(float) settings.width - 1e-4f, (float) settings.height - 1e-4f});
 
             sf::Vector2f velocity = {velocityDistrib(generator), velocityDistrib(generator)};
             sf::Vector2f preferredVelocity = {cosf(angle), sinf(angle)};
@@ -546,9 +579,16 @@ World::World(WorldSettings settings, int seed) :
         }
     }
 
-    std::exponential_distribution<float> supplyGenerationDistrib(1.f);
     for (const auto& chunk: chunks)
-        chunk->supplyGeneration = supplyGenerationDistrib(generator);
+    {
+        bool isCity = distrib01(generator) > 0.98f;
+        chunk->supplyGeneration = distrib01(generator) * 0.1f;
+        if(isCity)
+            chunk->supplyGeneration *= 10;
+
+        if(chunk->supplyGeneration > maxSupplyGeneration)
+            maxSupplyGeneration = chunk->supplyGeneration;
+    }
 }
 
 void World::step(float delta)
@@ -580,21 +620,41 @@ void World::draw(sf::RenderTarget& target, sf::RenderStates states) const
     }
     else if (viewMode == ViewMode::SUPPLY)
     {
-        sf::Image claimableImg = sf::Image();
-        claimableImg.create(settings.numChunks.x, settings.numChunks.y);
+        sf::Image img = sf::Image();
+        img.create(settings.numChunks.x, settings.numChunks.y);
         for (int x = 0; x < settings.numChunks.x; x++)
         {
             for (int y = 0; y < settings.numChunks.y; y++)
             {
                 auto& chunk = getChunk(sf::Vector2i(x, y));
-                sf::Vector3f colorVec = chunk->supply * sf::Vector3f(10.f, 10.f, 10.f);
-                claimableImg.setPixel(x, y,
-                                      sf::Color((uint8_t) colorVec.x, (uint8_t) colorVec.y, (uint8_t) colorVec.z, 127));
+                sf::Vector3f colorVec = chunk->supply * sf::Vector3f(255.f, 255.f, 255.f) / (10.f * maxSupplyGeneration);
+                img.setPixel(x, y,sf::Color((uint8_t) colorVec.x, (uint8_t) colorVec.y, (uint8_t) colorVec.z));
             }
         }
 
         sf::Texture t = sf::Texture();
-        t.loadFromImage(claimableImg);
+        t.loadFromImage(img);
+        sf::Sprite sprite(t);
+        sprite.setScale(settings.pixelsPerChunk, settings.pixelsPerChunk);
+
+        target.draw(sprite, states);
+    }
+    else if(viewMode == ViewMode::SUPPLY_GENERATION)
+    {
+        sf::Image img = sf::Image();
+        img.create(settings.numChunks.x, settings.numChunks.y);
+        for (int x = 0; x < settings.numChunks.x; x++)
+        {
+            for (int y = 0; y < settings.numChunks.y; y++)
+            {
+                auto& chunk = getChunk(sf::Vector2i(x, y));
+                sf::Vector3f colorVec = chunk->supplyGeneration * sf::Vector3f(255.f, 255.f, 255.f) / maxSupplyGeneration;
+                img.setPixel(x, y,sf::Color((uint8_t) colorVec.x, (uint8_t) colorVec.y, (uint8_t) colorVec.z));
+            }
+        }
+
+        sf::Texture t = sf::Texture();
+        t.loadFromImage(img);
         sf::Sprite sprite(t);
         sprite.setScale(settings.pixelsPerChunk, settings.pixelsPerChunk);
 

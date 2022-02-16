@@ -5,6 +5,7 @@ enum ViewMode
 {
     DEFAULT,
     SUPPLY,
+    SUPPLY_GENERATION
 };
 
 #endif //CELL_BATTLES_VIEW_MODE_H
