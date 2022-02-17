@@ -9,7 +9,12 @@ struct Cell
 {
     int teamId;
     int seed;
-    float strength;
+
+    float attack;
+    float defense;
+    float speed;
+    float metabolism;
+
     float health;
     float supply;
     float targetSupply;
@@ -18,7 +23,8 @@ struct Cell
     sf::Vector2f preferredVelocity;
     sf::Vector2f position;
 
-    Cell(int teamId, int seed, float strength, float health, float supply, float targetSupply, sf::Vector2f velocity,
+    Cell(int teamId, int seed, float attack, float defense, float speed, float metabolism,
+         float health, float supply, float targetSupply, sf::Vector2f velocity,
          sf::Vector2f preferredVelocity, sf::Vector2f position);
 };
 

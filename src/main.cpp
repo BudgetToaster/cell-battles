@@ -23,7 +23,7 @@ int main()
 
     worldSettings.numTeams = 4;
     worldSettings.cellRadius = 3;
-    worldSettings.initialCellsPerTeam = 1000;
+    worldSettings.initialCellsPerTeam = 10;
     worldSettings.cellAttackRange = 10;
     worldSettings.supplyDiffusionRate = 1.f;
 
@@ -46,10 +46,10 @@ int main()
     sf::Font robotoFont;
     robotoFont.loadFromFile("roboto/Roboto-Light.ttf");
 
-    sf::Text fpsText;
-    fpsText.setFont(robotoFont);
-    fpsText.setCharacterSize(11);
-    fpsText.setFillColor(sf::Color::White);
+    sf::Text statsText;
+    statsText.setFont(robotoFont);
+    statsText.setCharacterSize(11);
+    statsText.setFillColor(sf::Color::White);
 
     auto lastTime = std::chrono::steady_clock::now().time_since_epoch().count();
     while (window.isOpen())
@@ -74,14 +74,18 @@ int main()
 
         auto now = std::chrono::steady_clock::now().time_since_epoch().count();
         float delta = (float) (now - lastTime) / 1000000000.f;
-        fpsText.setString(std::string("FPS: ") + std::to_string(1.f / delta));
+        float fps = 1.f / delta;
+
         if (delta > 0.2) delta = 0.2;
         world.step(delta);
         lastTime = now;
 
+        statsText.setString(std::string("FPS: ") + std::to_string(fps) +
+            "\n" + world.getStats());
+
         window.clear();
         window.draw(world);
-        window.draw(fpsText);
+        window.draw(statsText);
         window.display();
     }
 

@@ -78,6 +78,8 @@ public:
     void draw(sf::RenderTarget& target, sf::RenderStates states) const override;
 
     sf::Vector2i worldToChunkPos(sf::Vector2f position) const;
+
+    std::string getStats();
 };
 
 #endif //CELL_BATTLES_WORLD_H

@@ -291,7 +291,7 @@ void World::attackNearby(float delta)
         auto closestEnemy = findNearestEnemies(*c, settings.cellAttackRange);
         if (closestEnemy == nullptr) continue;
 
-        float damageMul = c->strength / closestEnemy->strength * 0.3f;
+        float damageMul = c->attack / closestEnemy->attack * 0.3f;
 
         closestEnemy->health -= delta * damageMul;
 
@@ -319,7 +319,7 @@ void World::spawnChildren(float delta)
 {
     static std::uniform_real_distribution<float> angleDistrib(0.f, PI_f * 2);
     static std::uniform_real_distribution<float> distrib01(0.f, 1);
-    static std::uniform_real_distribution<float> strengthMulDist(0.8f, 1.25f);
+    static std::uniform_real_distribution<float> statMulDist(0.666f, 1.5f);
     static std::uniform_real_distribution<float> velocityDistrib(-1.f, 1);
     static std::uniform_int_distribution<int> seedDistrib(-(1 << 30), 1 << 30);
     for (auto& parent: cells)
@@ -341,13 +341,29 @@ void World::spawnChildren(float delta)
             sf::Vector2f velocity = {velocityDistrib(generator), velocityDistrib(generator)};
             sf::Vector2f preferredVelocity = {cosf(angle), sinf(angle)};
 
-            auto strengthMul = strengthMulDist(generator);
+            auto attackMult = statMulDist(generator);
+            float childAttack = parent->attack * attackMult;
+            auto defenseMult = statMulDist(generator);
+            float childDefense = parent->defense * defenseMult;
+            auto speedMult = statMulDist(generator);
+            float childSpeed = parent->speed * speedMult;
+            auto metabolismMult = statMulDist(generator);
+            float childMetabolism = parent->metabolism * metabolismMult;
+
+            float childStatSum = childAttack + childDefense + childSpeed + childMetabolism;
+            if(childStatSum > 1)
+            {
+                childAttack /= childStatSum;
+                childDefense /= childStatSum;
+                childSpeed /= childStatSum;
+                childMetabolism /= childStatSum;
+            }
 
             float targetSupply = distrib01(generator) > 0.5 ? 1.f : 3.f;
 
             auto child = std::make_shared<Cell>(parent->teamId, seedDistrib(generator),
-                                                parent->strength * strengthMul, 1, 1, targetSupply,
-                                                velocity, preferredVelocity, position);
+                                                childAttack, childDefense, childMetabolism, childSpeed,
+                                                1, 1, targetSupply, velocity, preferredVelocity, position);
             child->lastBirth = worldTime;
             sf::Vector2i chunkPos = worldToChunkPos(child->position);
             this->cells.push_back(child);
@@ -620,8 +636,11 @@ World::World(WorldSettings settings, int seed) :
 
             float targetSupply = distrib01(generator) > 0.5 ? 1.f : 3.f;
 
-            auto c = std::make_shared<Cell>(teamId, seedDistrib(generator), 1, 1, 1, targetSupply,
-                                            velocity, prefferedVelocity, position);
+            auto c = std::make_shared<Cell>(teamId, seedDistrib(generator),
+                                            0.25f, 0.25f, 0.25f, 0.25f,
+                                            1, 1, targetSupply, velocity,
+                                            prefferedVelocity, position);
+
             sf::Vector2i chunkPos = worldToChunkPos(c->position);
             this->cells.push_back(c);
             auto& chunk = this->getChunk(chunkPos);
@@ -736,3 +755,36 @@ void World::draw(sf::RenderTarget& target, sf::RenderStates states) const
 }
 
 World::~World() {}
+
+std::string World::getStats()
+{
+    std::string output = "";
+
+    std::vector<float> averageAttack(settings.numTeams);
+    std::vector<float> averageDefense(settings.numTeams);
+    std::vector<float> averageSpeed(settings.numTeams);
+    std::vector<float> averageMetabolism(settings.numTeams);
+    std::vector<int> teamCounts(settings.numTeams);
+
+    for(auto& cell : cells) {
+        teamCounts[cell->teamId] += 1;
+        averageAttack[cell->teamId] += cell->attack;
+        averageDefense[cell->teamId] += cell->defense;
+        averageSpeed[cell->teamId] += cell->speed;
+        averageMetabolism[cell->teamId] += cell->metabolism;
+    }
+
+    for(int i = 0; i < settings.numTeams; i++) {
+        averageAttack[i] /= (float)teamCounts[i];
+        averageDefense[i] /= (float)teamCounts[i];
+        averageSpeed[i] /= (float)teamCounts[i];
+        averageMetabolism[i] /= (float)teamCounts[i];
+
+        output += std::to_string(averageAttack[i])+',';
+        output += std::to_string(averageDefense[i])+',';
+        output += std::to_string(averageSpeed[i])+',';
+        output += std::to_string(averageMetabolism[i])+'\n';
+    }
+
+    return output;
+}
