@@ -23,8 +23,9 @@ int main()
 
     worldSettings.numTeams = 4;
     worldSettings.cellRadius = 3;
-    worldSettings.initialCellsPerTeam = 100;
+    worldSettings.initialCellsPerTeam = 1000;
     worldSettings.cellAttackRange = 10;
+    worldSettings.supplyDiffusionRate = 0.1f;
 
     worldSettings.teamColors = {
             sf::Color::Green,
@@ -66,12 +67,15 @@ int main()
                     world.viewMode = SUPPLY;
                 else if(event.key.code == sf::Keyboard::F3)
                     world.viewMode = SUPPLY_GENERATION;
+                else if(event.key.code == sf::Keyboard::Escape)
+                    std::exit(0);
             }
         }
 
         auto now = std::chrono::steady_clock::now().time_since_epoch().count();
-        float delta = (float) (now - lastTime) / 1000000000.f * 5;
+        float delta = (float) (now - lastTime) / 1000000000.f;
         fpsText.setString(std::string("FPS: ") + std::to_string(1.f / delta));
+        delta *= 5.f;
         if (delta > 0.2) delta = 0.2;
         world.step(delta);
         lastTime = now;

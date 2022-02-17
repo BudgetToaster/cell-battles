@@ -115,7 +115,7 @@ void World::updateChunkSupply(float delta)
             float dsdx2 = (eastSupply - curChunk->supply) - (curChunk->supply - westSupply);
             float dsdy2 = (southSupply - curChunk->supply) - (curChunk->supply - northSupply);
 
-            float supplyTransfer = (dsdx2 + dsdy2) + curChunk->supplyGeneration;
+            float supplyTransfer = (dsdx2 + dsdy2) * settings.supplyDiffusionRate + curChunk->supplyGeneration;
 
             transferBuffer[x + y * settings.numChunks.x] = supplyTransfer;
         }
@@ -306,7 +306,7 @@ void World::spawnChildren(float delta)
     static std::uniform_int_distribution<int> seedDistrib(-(1 << 30), 1 << 30);
     for (auto& parent: cells)
     {
-        if (parent->supply >= 2.5 && parent->lastBirth < worldTime - 10)
+        if (parent->supply >= 2.5 && parent->lastBirth < worldTime - settings.childSpawnDelay)
         {
             parent->supply -= 2;
             parent->lastBirth = worldTime;
@@ -582,9 +582,12 @@ World::World(WorldSettings settings, int seed) :
     for (const auto& chunk: chunks)
     {
         bool isCity = distrib01(generator) > 0.98f;
+        bool isMegapolis = isCity && distrib01(generator) > 0.99f;
         chunk->supplyGeneration = distrib01(generator) * 0.1f;
         if(isCity)
-            chunk->supplyGeneration *= 10;
+            chunk->supplyGeneration *= 10.f;
+        if(isMegapolis)
+            chunk->supplyGeneration *= 10.f;
 
         if(chunk->supplyGeneration > maxSupplyGeneration)
             maxSupplyGeneration = chunk->supplyGeneration;

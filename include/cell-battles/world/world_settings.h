@@ -38,6 +38,10 @@ public:
 
     // Radius of the spawn circle
     float spawnRadius;
+
+    float supplyDiffusionRate;
+
+    float childSpawnDelay = 30.f;
 };
 
 #endif //CELL_BATTLES_WORLD_SETTINGS_H
