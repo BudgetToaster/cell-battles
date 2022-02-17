@@ -11,7 +11,7 @@ int main()
     constexpr int HEIGHT = 1080;
 
     sf::RenderWindow window(sf::VideoMode(WIDTH, HEIGHT), "Cell Battles",
-                            sf::Style::Fullscreen, windowSettings);
+                            sf::Style::Default, windowSettings);
     window.setFramerateLimit(0);
     window.setVerticalSyncEnabled(false);
 
@@ -25,7 +25,7 @@ int main()
     worldSettings.cellRadius = 3;
     worldSettings.initialCellsPerTeam = 1000;
     worldSettings.cellAttackRange = 10;
-    worldSettings.supplyDiffusionRate = 0.1f;
+    worldSettings.supplyDiffusionRate = 1.f;
 
     worldSettings.teamColors = {
             sf::Color::Green,
@@ -75,7 +75,6 @@ int main()
         auto now = std::chrono::steady_clock::now().time_since_epoch().count();
         float delta = (float) (now - lastTime) / 1000000000.f;
         fpsText.setString(std::string("FPS: ") + std::to_string(1.f / delta));
-        delta *= 5.f;
         if (delta > 0.2) delta = 0.2;
         world.step(delta);
         lastTime = now;

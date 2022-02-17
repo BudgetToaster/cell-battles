@@ -42,6 +42,8 @@ public:
     float supplyDiffusionRate;
 
     float childSpawnDelay = 30.f;
+
+    float speed = 1.f;
 };
 
 #endif //CELL_BATTLES_WORLD_SETTINGS_H

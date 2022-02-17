@@ -76,6 +76,24 @@ void World::updateTerritoryColor(sf::Vector2i pos, const std::unique_ptr<Chunk>&
     territoryMap->setPixel(pos.x, pos.y, color);
 }
 
+void World::developChunks(float delta)
+{
+    for(auto& chunk : chunks) {
+        int owner = chunk->getCurrentOwner();
+
+        if(chunk->getCurrentOwner() == -1)
+        {
+            chunk->development -= delta;
+            if(chunk->development < 0) chunk->development = 0;
+        }
+        else
+        {
+            chunk->development += delta / 120.f;
+            if(chunk->development > 1.f) chunk->development = 1.f;
+        }
+    }
+}
+
 void World::updateChunkSupply(float delta)
 {
     static std::vector<int> ownerBuffer(settings.numChunks.x * settings.numChunks.y);
@@ -115,7 +133,7 @@ void World::updateChunkSupply(float delta)
             float dsdx2 = (eastSupply - curChunk->supply) - (curChunk->supply - westSupply);
             float dsdy2 = (southSupply - curChunk->supply) - (curChunk->supply - northSupply);
 
-            float supplyTransfer = (dsdx2 + dsdy2) * settings.supplyDiffusionRate + curChunk->supplyGeneration;
+            float supplyTransfer = (dsdx2 + dsdy2) * settings.supplyDiffusionRate + curChunk->getEffectiveSupplyGeneration();
 
             transferBuffer[x + y * settings.numChunks.x] = supplyTransfer;
         }
@@ -371,6 +389,31 @@ void World::updateCellPosition(const std::shared_ptr<Cell>& cell, sf::Vector2f n
     }
 }
 
+void World::floodClaim(sf::Vector2i center, int maxIters, int teamId)
+{
+    std::unique_ptr<std::list<sf::Vector2i>> stack = std::make_unique<std::list<sf::Vector2i>>();
+    stack->push_back(center);
+
+    int i = 0;
+    while (!stack->empty() && i < maxIters)
+    {
+        sf::Vector2i p = stack->front();
+        stack->pop_front();
+
+        if (!inBoundsEx(p, {0, 0}, settings.numChunks))
+            continue;
+
+        auto &chunk = getChunk(p);
+        if (chunk->getCurrentOwner() != -1) continue;
+        chunk->teamOwnership[teamId] = 1.f;
+        stack->push_back(sf::Vector2i(p.x + 1, p.y));
+        stack->push_back(sf::Vector2i(p.x - 1, p.y));
+        stack->push_back(sf::Vector2i(p.x, p.y + 1));
+        stack->push_back(sf::Vector2i(p.x, p.y - 1));
+        i++;
+    }
+}
+
 std::shared_ptr<Cell> World::findNearestEnemies(const Cell& cell, float maxDistance)
 {
     int searchDistance = (int) ceilf(maxDistance / settings.pixelsPerChunk);
@@ -543,6 +586,19 @@ World::World(WorldSettings settings, int seed) :
 
     this->territoryMap->create(this->settings.numChunks.x, this->settings.numChunks.y);
 
+
+    for(int i = 0; i < this->settings.numTeams; i++)
+        floodClaim(worldToChunkPos(this->settings.teamSpawns[i]), 50, i);
+    for(int x = 0; x < this->settings.numChunks.x; x++)
+    {
+        for(int y = 0; y < this->settings.numChunks.y; y++)
+        {
+            auto& chunk = getChunk({x, y});
+            if(chunk->getCurrentOwner() != -1) chunk->development = 1.f;
+            updateTerritoryColor({x, y}, chunk);
+        }
+    }
+
     std::uniform_real_distribution<float> angleDistrib(0.f, PI_f * 2);
     std::uniform_real_distribution<float> distrib01(0.f, 1);
     std::uniform_real_distribution<float> velocityDistrib(-1.f, 1);
@@ -571,11 +627,11 @@ World::World(WorldSettings settings, int seed) :
             auto& chunk = this->getChunk(chunkPos);
             chunk->cells[c->teamId].push_back(c);
 
-            if (chunk->teamOwnership[c->teamId] != 1.f)
-            {
-                for (int k = 0; k < this->settings.numTeams; k++)
-                    chunk->teamOwnership[k] = k == c->teamId ? 1.f : 0.f;
-            }
+            //if (chunk->teamOwnership[c->teamId] != 1.f)
+            //{
+            //    for (int k = 0; k < this->settings.numTeams; k++)
+            //        chunk->teamOwnership[k] = k == c->teamId ? 1.f : 0.f;
+            //}
         }
     }
 
@@ -596,9 +652,12 @@ World::World(WorldSettings settings, int seed) :
 
 void World::step(float delta)
 {
+    delta *= settings.speed;
+
     this->worldTime += delta;
 
     updateTerritories(delta);
+    developChunks(delta);
     updateChunkSupply(delta);
     updateCellSupply(delta);
     updateVelocities(delta);
@@ -651,7 +710,7 @@ void World::draw(sf::RenderTarget& target, sf::RenderStates states) const
             for (int y = 0; y < settings.numChunks.y; y++)
             {
                 auto& chunk = getChunk(sf::Vector2i(x, y));
-                sf::Vector3f colorVec = chunk->supplyGeneration * sf::Vector3f(255.f, 255.f, 255.f) / maxSupplyGeneration;
+                sf::Vector3f colorVec = chunk->getEffectiveSupplyGeneration() * sf::Vector3f(255.f, 255.f, 255.f) / maxSupplyGeneration;
                 img.setPixel(x, y,sf::Color((uint8_t) colorVec.x, (uint8_t) colorVec.y, (uint8_t) colorVec.z));
             }
         }

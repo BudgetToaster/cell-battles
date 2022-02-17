@@ -14,3 +14,8 @@ int Chunk::getCurrentOwner()
         else if (teamOwnership[i] != 0.f) return -1;
     return -1;
 }
+
+float Chunk::getEffectiveSupplyGeneration()
+{
+    return supplyGeneration * development;
+}

@@ -14,6 +14,7 @@ class Chunk
     std::vector<float> teamOwnership;
     float supply = 0;
     float supplyGeneration = 0;
+    float development = 0;
 
 
 public:
@@ -23,6 +24,8 @@ public:
 
     // Returns the teamId of the team who fully owns the chunk. -1 if not fully owned by any team.
     int getCurrentOwner();
+
+    float getEffectiveSupplyGeneration();
 };
 
 

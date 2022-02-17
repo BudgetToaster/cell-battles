@@ -33,6 +33,8 @@ class World : public sf::Drawable
 
     void updateTerritoryColor(sf::Vector2i pos, const std::unique_ptr<Chunk>& chunk);
 
+    void developChunks(float delta);
+
     void updateChunkSupply(float delta);
 
     void updateCellSupply(float delta);
@@ -51,6 +53,8 @@ class World : public sf::Drawable
 
     // Updates cell position. Will also update chunks the cell is in, or moves to.
     void updateCellPosition(const std::shared_ptr<Cell>& cell, sf::Vector2f newPosition);
+
+    void floodClaim(sf::Vector2i center, int maxIters, int teamId);
 
     std::shared_ptr<Cell> findNearestEnemies(const Cell& cell, float maxDistance);
 
