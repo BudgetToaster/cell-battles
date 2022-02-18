@@ -17,8 +17,7 @@ struct Cell
 
     float health;
     float supply;
-    float targetSupply;
-    float lastBirth = 0;
+    float childProgress = 0.f;
     sf::Vector2f velocity;
     sf::Vector2f preferredVelocity;
     sf::Vector2f position;

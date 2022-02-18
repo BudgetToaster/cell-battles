@@ -14,7 +14,6 @@ Cell::Cell(int teamId, int seed, float attack, float defense, float speed, float
 
     this->health = health;
     this->supply = supply;
-    this->targetSupply = targetSupply;
     this->velocity = velocity;
     this->preferredVelocity = preferredVelocity;
     this->position = position;

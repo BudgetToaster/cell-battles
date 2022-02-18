@@ -41,7 +41,7 @@ public:
 
     float supplyDiffusionRate;
 
-    float childSpawnDelay = 30.f;
+    float childSpawnDelay = 20.f;
 
     float speed = 1.f;
 };

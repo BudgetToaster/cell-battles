@@ -79,8 +79,6 @@ void World::updateTerritoryColor(sf::Vector2i pos, const std::unique_ptr<Chunk>&
 void World::developChunks(float delta)
 {
     for(auto& chunk : chunks) {
-        int owner = chunk->getCurrentOwner();
-
         if(chunk->getCurrentOwner() == -1)
         {
             chunk->development -= delta;
@@ -153,6 +151,13 @@ void World::updateChunkSupply(float delta)
 void World::updateCellSupply(float delta)
 {
     for(auto& cell : cells) {
+        if(cell->supply >= 1.f)
+        {
+            float childProgressTransfer = delta / settings.childSpawnDelay * 2.f;
+            cell->supply -= childProgressTransfer;
+            cell->childProgress += childProgressTransfer;
+        }
+
         float passiveLoss = delta * 0.0075f * (cell->supply * cell->supply + 5.f);
         passiveLoss /= cell->metabolism;
         cell->supply -= passiveLoss;
@@ -165,7 +170,7 @@ void World::updateCellSupply(float delta)
 
         auto& chunk = getChunk(worldToChunkPos(cell->position));
         if(chunk->teamOwnership[cell->teamId] != 1.f) continue;
-        auto t = std::min(delta, chunk->supply);
+        auto t = std::min(std::min(delta, chunk->supply), cell->supply);
         cell->supply += t;
         chunk->supply -= t;
     }
@@ -179,7 +184,7 @@ void World::updateVelocities(float delta)
 
     for (auto& c: cells)
     {
-        bool needSupply = c->supply < c->targetSupply;
+        bool needSupply = c->supply < 0.9f;
 
         auto centerPos = worldToChunkPos(c->position);
         int rectRadius = (int) ceilf(cellViewRange);
@@ -324,10 +329,9 @@ void World::spawnChildren(float delta)
     static std::uniform_int_distribution<int> seedDistrib(-(1 << 30), 1 << 30);
     for (auto& parent: cells)
     {
-        if (parent->supply >= 2.5 && parent->lastBirth < worldTime - settings.childSpawnDelay)
+        if (parent->childProgress >= 2.f)
         {
-            parent->supply -= 2;
-            parent->lastBirth = worldTime;
+            parent->childProgress = 0.f;
 
             float angle = angleDistrib(this->generator);
             float dist = sqrtf(distrib01(this->generator)) * 3.f;
@@ -364,7 +368,6 @@ void World::spawnChildren(float delta)
             auto child = std::make_shared<Cell>(parent->teamId, seedDistrib(generator),
                                                 childAttack, childDefense, childMetabolism, childSpeed,
                                                 1, 1, targetSupply, velocity, preferredVelocity, position);
-            child->lastBirth = worldTime;
             sf::Vector2i chunkPos = worldToChunkPos(child->position);
             this->cells.push_back(child);
             auto& chunk = this->getChunk(chunkPos);
