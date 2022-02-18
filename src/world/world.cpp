@@ -168,11 +168,21 @@ void World::updateCellSupply(float delta)
             cell->supply = 0;
         }
 
-        auto& chunk = getChunk(worldToChunkPos(cell->position));
-        if(chunk->teamOwnership[cell->teamId] != 1.f) continue;
-        auto t = std::min(std::min(delta, chunk->supply), cell->supply);
-        cell->supply += t;
-        chunk->supply -= t;
+        auto centerPos = worldToChunkPos(cell->position);
+        for(int ox = -1; ox <= 1; ox++)
+        {
+            for(int oy = -1; oy <= 1; oy++)
+            {
+                if(!inBoundsEx(centerPos + sf::Vector2i(ox, oy), {0, 0}, settings.numChunks))
+                    continue;
+                auto& chunk = getChunk(worldToChunkPos(cell->position));
+                if(chunk->teamOwnership[cell->teamId] != 1.f) continue;
+                auto t = std::min(std::min(delta, chunk->supply), 1.f - cell->supply);
+                cell->supply += t;
+                chunk->supply -= t;
+            }
+        }
+
     }
 
     deleteDeadCells();
