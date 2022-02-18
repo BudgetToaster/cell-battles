@@ -153,7 +153,8 @@ void World::updateChunkSupply(float delta)
 void World::updateCellSupply(float delta)
 {
     for(auto& cell : cells) {
-        float passiveLoss = delta * 0.03f * (cell->supply * cell->supply + 5.f);
+        float passiveLoss = delta * 0.0075f * (cell->supply * cell->supply + 5.f);
+        passiveLoss /= cell->metabolism;
         cell->supply -= passiveLoss;
 
         if(cell->supply < 0)
@@ -163,7 +164,7 @@ void World::updateCellSupply(float delta)
         }
 
         auto& chunk = getChunk(worldToChunkPos(cell->position));
-        if(chunk->getCurrentOwner() != cell->teamId) continue;
+        if(chunk->teamOwnership[cell->teamId] != 1.f) continue;
         auto t = std::min(delta, chunk->supply);
         cell->supply += t;
         chunk->supply -= t;
@@ -199,7 +200,6 @@ void World::updateVelocities(float delta)
                 auto& chunk = getChunk(offsetPos);
 
                 bool isClaimed = chunk->teamOwnership[c->teamId] == 1.f;
-
 
                 if ((float) distSq <= cellViewRange * cellViewRange)
                 {
@@ -245,7 +245,7 @@ void World::updateVelocities(float delta)
             targetVelocity = c->preferredVelocity;
         auto targetVelocityMag = sqrtf(targetVelocity.x * targetVelocity.x + targetVelocity.y * targetVelocity.y);
         targetVelocity /= targetVelocityMag;
-        targetVelocity *= 20.f;
+        targetVelocity *= 50.f;
         c->velocity = (1 - delta) * c->velocity + delta * targetVelocity;
     }
 }
@@ -254,7 +254,7 @@ void World::updatePositions(float delta)
 {
     for (auto& cell: cells)
     {
-        sf::Vector2f newPos = cell->position + cell->velocity * delta;
+        sf::Vector2f newPos = cell->position + cell->velocity * delta * cell->speed;
         if (newPos.x < 0)
         {
             newPos.x = 0;
@@ -291,7 +291,7 @@ void World::attackNearby(float delta)
         auto closestEnemy = findNearestEnemies(*c, settings.cellAttackRange);
         if (closestEnemy == nullptr) continue;
 
-        float damageMul = c->attack / closestEnemy->attack * 0.3f;
+        float damageMul = c->attack / closestEnemy->defense * 0.3f;
 
         closestEnemy->health -= delta * damageMul;
 
