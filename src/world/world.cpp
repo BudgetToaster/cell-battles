@@ -151,7 +151,7 @@ void World::updateChunkSupply(float delta)
 void World::updateCellSupply(float delta)
 {
     for(auto& cell : cells) {
-        if(cell->supply >= 1.f)
+        if(cell->supply >= 1.f && cell->numChildren < 2)
         {
             float childProgressTransfer = delta / settings.childSpawnDelay * 2.f;
             cell->supply -= childProgressTransfer;
@@ -167,6 +167,8 @@ void World::updateCellSupply(float delta)
             cell->health += cell->supply;
             cell->supply = 0;
         }
+
+        if(cell->numChildren >= 2) continue;
 
         auto centerPos = worldToChunkPos(cell->position);
         for(int ox = -1; ox <= 1; ox++)
@@ -306,7 +308,7 @@ void World::attackNearby(float delta)
         auto closestEnemy = findNearestEnemies(*c, settings.cellAttackRange);
         if (closestEnemy == nullptr) continue;
 
-        float damageMul = c->attack / closestEnemy->defense * 0.3f;
+        float damageMul = c->attack * (c->supply + 0.5f) / (closestEnemy->defense * (closestEnemy->supply + 0.5f)) * 0.3f;
 
         closestEnemy->health -= delta * damageMul;
 
@@ -342,6 +344,7 @@ void World::spawnChildren(float delta)
         if (parent->childProgress >= 2.f)
         {
             parent->childProgress = 0.f;
+            parent->numChildren += 1;
 
             float angle = angleDistrib(this->generator);
             float dist = sqrtf(distrib01(this->generator)) * 3.f;
